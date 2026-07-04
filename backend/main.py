@@ -13,6 +13,7 @@ Run locally with:
 from __future__ import annotations
 
 import os
+import time
 from contextlib import asynccontextmanager
 from datetime import date
 from enum import Enum
@@ -88,6 +89,7 @@ class Asset(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     ticker_symbol: Mapped[str] = mapped_column(String(20), unique=True, nullable=False)
+    exchange: Mapped[str] = mapped_column(String(8), nullable=False, default="NSE")
 
     transactions: Mapped[list["Transaction"]] = relationship(back_populates="asset")
 
@@ -117,6 +119,7 @@ class TransactionCreate(BaseModel):
 
     account_id: int = Field(..., gt=0, description="ID of the brokerage account")
     ticker_symbol: str = Field(..., min_length=1, max_length=20)
+    exchange: str = "NSE"
     trade_type: TradeType = TradeType.BUY
     quantity: float = Field(..., gt=0, description="Number of shares")
     price: float = Field(..., gt=0, description="Price per share")
@@ -171,6 +174,10 @@ class HoldingOut(BaseModel):
     total_quantity: float
     average_buy_price: float
     invested_amount: float  # total_quantity * average_buy_price
+    current_price: float | None = None
+    current_value: float | None = None
+    unrealized_pnl: float | None = None
+    pnl_pct: float | None = None
 
 
 class PortfolioOut(BaseModel):
@@ -197,16 +204,19 @@ DEFAULT_ACCOUNTS = ["Account 1", "Account 2", "Account 3"]
 
 def seed_accounts(db: Session) -> None:
     """Insert the three default accounts if they don't already exist."""
-    existing = {name for (name,) in db.execute(select(Account.name)).all()}
-    for name in DEFAULT_ACCOUNTS:
-        if name not in existing:
-            db.add(Account(name=name))
-    db.commit()
+    pass
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    from sqlalchemy import inspect, text
+    with engine.begin() as conn:
+        insp = inspect(conn)
+        if "assets" in insp.get_table_names():
+            columns = [c["name"] for c in insp.get_columns("assets")]
+            if "exchange" not in columns:
+                conn.execute(text("ALTER TABLE assets ADD COLUMN exchange VARCHAR(8) NOT NULL DEFAULT 'NSE'"))
     with SessionLocal() as db:
         seed_accounts(db)
     yield
@@ -233,6 +243,60 @@ def get_db():
 
 
 # ---------------------------------------------------------------------------
+# Market Data & Caching
+# ---------------------------------------------------------------------------
+
+import yfinance as yf
+
+market_cache: dict[tuple[str, str], tuple[float, dict]] = {}
+CACHE_TTL = 900  # 15 minutes
+
+def get_market_data(ticker: str, exchange: str, range_val: str) -> dict:
+    key = (ticker, range_val)
+    now = time.time()
+    if key in market_cache:
+        ts, data = market_cache[key]
+        if now - ts < CACHE_TTL:
+            return data
+
+    yf_ticker = ticker
+    currency = "$"
+    if exchange == "NSE":
+        yf_ticker = f"{ticker}.NS"
+        currency = "₹"
+    elif exchange == "BSE":
+        yf_ticker = f"{ticker}.BO"
+        currency = "₹"
+
+    try:
+        t = yf.Ticker(yf_ticker)
+        hist = t.history(period=range_val, interval="1d")
+        if hist.empty:
+            data = {"available": False, "reason": "No data found"}
+        else:
+            closes = hist["Close"]
+            current_price = float(closes.iloc[-1])
+            start_price = float(closes.iloc[0])
+            change_pct = ((current_price - start_price) / start_price * 100) if start_price else 0.0
+            
+            points = [{"date": str(idx.date()), "close": round(float(val), 2)} for idx, val in closes.items()]
+            
+            data = {
+                "available": True,
+                "ticker": ticker,
+                "exchange": exchange,
+                "currency": currency,
+                "current_price": round(current_price, 2),
+                "change_pct": round(change_pct, 2),
+                "points": points,
+            }
+    except Exception as e:
+        data = {"available": False, "reason": str(e)}
+
+    market_cache[key] = (now, data)
+    return data
+
+# ---------------------------------------------------------------------------
 # Portfolio math
 # ---------------------------------------------------------------------------
 
@@ -248,10 +312,12 @@ def compute_holdings(transactions: list[Transaction]) -> list[HoldingOut]:
     Positions that net out to zero (or negative) are excluded.
     """
     positions: dict[str, dict[str, float]] = {}
+    exchanges: dict[str, str] = {}
 
     # Process in chronological order so the running average is correct.
     for txn in sorted(transactions, key=lambda t: (t.date, t.id)):
         ticker = txn.asset.ticker_symbol
+        exchanges[ticker] = txn.asset.exchange
         pos = positions.setdefault(ticker, {"qty": 0.0, "cost": 0.0})
 
         if txn.trade_type == TradeType.BUY.value:
@@ -271,14 +337,23 @@ def compute_holdings(transactions: list[Transaction]) -> list[HoldingOut]:
         if pos["qty"] <= 0:
             continue
         avg_price = pos["cost"] / pos["qty"]
-        holdings.append(
-            HoldingOut(
-                ticker_symbol=ticker,
-                total_quantity=round(pos["qty"], 6),
-                average_buy_price=round(avg_price, 4),
-                invested_amount=round(pos["cost"], 2),
-            )
+        
+        mdata = get_market_data(ticker, exchanges.get(ticker, "NSE"), "1d")
+        
+        h = HoldingOut(
+            ticker_symbol=ticker,
+            total_quantity=round(pos["qty"], 6),
+            average_buy_price=round(avg_price, 4),
+            invested_amount=round(pos["cost"], 2),
         )
+        if mdata.get("available"):
+            cp = mdata["current_price"]
+            h.current_price = cp
+            h.current_value = round(cp * h.total_quantity, 2)
+            h.unrealized_pnl = round(h.current_value - h.invested_amount, 2)
+            h.pnl_pct = round((h.unrealized_pnl / h.invested_amount * 100), 2) if h.invested_amount else 0.0
+
+        holdings.append(h)
 
     # Largest positions first — nicer for the dashboard table and chart.
     holdings.sort(key=lambda h: h.invested_amount, reverse=True)
@@ -336,7 +411,7 @@ def create_transaction(
         select(Asset).where(Asset.ticker_symbol == payload.ticker_symbol)
     )
     if asset is None:
-        asset = Asset(ticker_symbol=payload.ticker_symbol)
+        asset = Asset(ticker_symbol=payload.ticker_symbol, exchange=payload.exchange)
         db.add(asset)
         db.flush()  # assigns asset.id without committing yet
 
@@ -471,6 +546,57 @@ def delete_transaction(transaction_id: int, db: Session = Depends(get_db)) -> Re
     db.delete(txn)
     db.commit()
     return Response(status_code=204)
+
+
+class AccountCreate(BaseModel):
+    name: str
+
+@app.post("/api/accounts", response_model=AccountOut, status_code=201)
+def create_account(payload: AccountCreate, db: Session = Depends(get_db)):
+    if not payload.name.strip():
+        raise HTTPException(409, "Account name cannot be blank")
+    if db.scalar(select(Account).where(Account.name == payload.name.strip())):
+        raise HTTPException(409, "Account name already exists")
+    acc = Account(name=payload.name.strip())
+    db.add(acc)
+    db.commit()
+    db.refresh(acc)
+    return acc
+
+@app.put("/api/accounts/{account_id}", response_model=AccountOut)
+def rename_account(account_id: int, payload: AccountCreate, db: Session = Depends(get_db)):
+    acc = db.get(Account, account_id)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    if not payload.name.strip():
+        raise HTTPException(409, "Account name cannot be blank")
+    if db.scalar(select(Account).where(Account.name == payload.name.strip(), Account.id != account_id)):
+        raise HTTPException(409, "Account name already exists")
+    acc.name = payload.name.strip()
+    db.commit()
+    db.refresh(acc)
+    return acc
+
+@app.delete("/api/accounts/{account_id}", status_code=204)
+def delete_account(account_id: int, db: Session = Depends(get_db)):
+    acc = db.get(Account, account_id)
+    if not acc:
+        raise HTTPException(404, "Account not found")
+    if db.scalar(select(Transaction).where(Transaction.account_id == account_id)):
+        raise HTTPException(400, "Delete or move its trades first")
+    db.delete(acc)
+    db.commit()
+    return Response(status_code=204)
+
+
+@app.get("/api/market/{asset_id}")
+def get_market_api(asset_id: int, range: str = "1w", db: Session = Depends(get_db)):
+    asset = db.get(Asset, asset_id)
+    if not asset:
+        raise HTTPException(404, "Asset not found")
+    if range not in ("1w", "1mo", "1y"):
+        range = "1w"
+    return get_market_data(asset.ticker_symbol, asset.exchange, range)
 
 
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 const EMPTY = {
   account_id: "",
   ticker_symbol: "",
+  exchange: "NSE",
   trade_type: "Buy",
   quantity: "",
   price: "",
@@ -61,6 +62,7 @@ export default function TradeForm({ accounts, onSaved }) {
         body: JSON.stringify({
           account_id: Number(form.account_id),
           ticker_symbol: form.ticker_symbol.trim().toUpperCase(),
+          exchange: form.exchange,
           trade_type: form.trade_type,
           quantity: Number(form.quantity),
           price: Number(form.price),
@@ -97,6 +99,20 @@ export default function TradeForm({ accounts, onSaved }) {
     `w-full rounded-md bg-ink border px-3 py-2 font-mono text-sm text-paper placeholder:text-mist/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold ${
       fieldErrors[key] ? "border-coral" : "border-line"
     }`;
+
+  if (accounts.length === 0) {
+    return (
+      <aside className="bg-panel border border-line rounded-xl p-5 h-fit lg:sticky lg:top-6 flex flex-col items-center justify-center text-center space-y-4">
+        <div className="w-12 h-12 rounded-full bg-line flex items-center justify-center">
+          <span className="text-xl">🏦</span>
+        </div>
+        <div>
+          <h2 className="font-display font-bold text-lg mb-1 text-paper">No accounts yet</h2>
+          <p className="text-mist text-sm">Create an account above to start logging your trades.</p>
+        </div>
+      </aside>
+    );
+  }
 
   return (
     <aside className="bg-panel border border-line rounded-xl p-5 h-fit lg:sticky lg:top-6">
@@ -156,16 +172,26 @@ export default function TradeForm({ accounts, onSaved }) {
         {/* Ticker */}
         <div>
           <label className="block text-xs font-mono text-mist mb-1" htmlFor="ticker">
-            Ticker symbol
+            Ticker symbol & Exchange
           </label>
-          <input
-            id="ticker"
-            type="text"
-            placeholder="e.g. AAPL"
-            value={form.ticker_symbol}
-            onChange={set("ticker_symbol")}
-            className={inputClass("ticker_symbol") + " uppercase"}
-          />
+          <div className="flex gap-2">
+            <input
+              id="ticker"
+              type="text"
+              placeholder="e.g. RELIANCE"
+              value={form.ticker_symbol}
+              onChange={set("ticker_symbol")}
+              className={inputClass("ticker_symbol") + " uppercase flex-1"}
+            />
+            <select
+              value={form.exchange}
+              onChange={set("exchange")}
+              className={inputClass("exchange") + " w-24 bg-ink"}
+            >
+              <option value="NSE">NSE</option>
+              <option value="BSE">BSE</option>
+            </select>
+          </div>
           {fieldErrors.ticker_symbol && (
             <p className="text-coral text-xs mt-1">{fieldErrors.ticker_symbol}</p>
           )}

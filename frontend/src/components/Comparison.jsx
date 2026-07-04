@@ -42,7 +42,7 @@ export default function Comparison({ comparison }) {
       const row = { ticker };
       for (const a of accounts) {
         const holding = a.holdings.find((h) => h.ticker_symbol === ticker);
-        row[a.account_name] = holding ? holding.invested_amount : 0;
+        row[a.account_name] = holding ? (holding.current_value !== null ? holding.current_value : holding.invested_amount) : 0;
       }
       row.__total = accounts.reduce((s, a) => s + (row[a.account_name] || 0), 0);
       return row;
@@ -51,13 +51,18 @@ export default function Comparison({ comparison }) {
 
   const hasData = tickers.length > 0;
 
+  const grand_total_current_value = accounts.reduce((acc, a) => acc + a.holdings.reduce((sum, h) => sum + (h.current_value !== null ? h.current_value : h.invested_amount), 0), 0);
+
   return (
     <div className="space-y-6">
       {/* One card per account */}
       <div className="grid gap-4 sm:grid-cols-3">
         {accounts.map((a, i) => {
+          const total_current_value = a.holdings.reduce((sum, h) => sum + (h.current_value !== null ? h.current_value : h.invested_amount), 0);
+          const total_pnl = total_current_value - a.total_invested;
+          const total_pnl_pct = a.total_invested > 0 ? (total_pnl / a.total_invested) * 100 : 0;
           const share =
-            grand_total > 0 ? (a.total_invested / grand_total) * 100 : 0;
+            grand_total_current_value > 0 ? (total_current_value / grand_total_current_value) * 100 : 0;
           return (
             <div
               key={a.account_id}
@@ -68,11 +73,13 @@ export default function Comparison({ comparison }) {
                 {a.account_name}
               </p>
               <p className="font-display text-2xl font-bold tabular-nums">
-                {currency(a.total_invested)}
+                {currency(total_current_value)}
+              </p>
+              <p className={`font-mono text-xs mt-1 ${total_pnl > 0 ? 'text-mint' : total_pnl < 0 ? 'text-coral' : 'text-mist'}`}>
+                {total_pnl > 0 ? '+' : ''}{currency(total_pnl)} ({total_pnl_pct > 0 ? '+' : ''}{total_pnl_pct.toFixed(2)}%)
               </p>
               <p className="font-mono text-xs text-mist mt-1">
-                {share.toFixed(1)}% of portfolio · {a.holdings.length} position
-                {a.holdings.length === 1 ? "" : "s"}
+                {share.toFixed(1)}% of portfolio
               </p>
             </div>
           );

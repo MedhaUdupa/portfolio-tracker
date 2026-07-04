@@ -26,10 +26,14 @@ export default function App() {
   const [error, setError] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
 
+  const [editingAccountId, setEditingAccountId] = useState(null);
+  const [editAccountName, setEditAccountName] = useState("");
+  const [isAddingAccount, setIsAddingAccount] = useState(false);
+  const [newAccountName, setNewAccountName] = useState("");
+
   const refresh = useCallback(() => setReloadKey((k) => k + 1), []);
 
-  // Load the account list once, on mount.
-  useEffect(() => {
+  const refreshAccounts = useCallback(() => {
     fetch("/api/accounts")
       .then((res) => {
         if (!res.ok) throw new Error("Failed to load accounts");
@@ -38,6 +42,68 @@ export default function App() {
       .then(setAccounts)
       .catch((err) => setError(err.message));
   }, []);
+
+  // Load the account list on mount and when explicitly refreshed
+  useEffect(() => {
+    refreshAccounts();
+  }, [refreshAccounts]);
+
+  const handleAddAccount = async (e) => {
+    e.preventDefault();
+    if (!newAccountName.trim()) return;
+    try {
+      const res = await fetch("/api/accounts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newAccountName })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || "Failed to create account");
+      }
+      setNewAccountName("");
+      setIsAddingAccount(false);
+      refreshAccounts();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleEditAccount = async (id, e) => {
+    e.preventDefault();
+    if (!editAccountName.trim()) return;
+    try {
+      const res = await fetch(`/api/accounts/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editAccountName })
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || "Failed to rename account");
+      }
+      setEditingAccountId(null);
+      setEditAccountName("");
+      refreshAccounts();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  const handleDeleteAccount = async (id) => {
+    if (!window.confirm("Delete this account?")) return;
+    try {
+      const res = await fetch(`/api/accounts/${id}`, { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || "Failed to delete account");
+      }
+      if (activeAccount === id) setActiveAccount(null);
+      refreshAccounts();
+    } catch (err) {
+      setError(err.message);
+    }
+  };
 
   // (Re)load data whenever the tab, view, or data version changes.
   useEffect(() => {
@@ -121,25 +187,74 @@ export default function App() {
           {/* Account tabs (not relevant in compare view, which is per-account by design) */}
           {view !== "compare" && (
             <nav
-              className="flex flex-wrap gap-2 mb-6"
+              className="flex flex-wrap gap-2 mb-6 items-center"
               aria-label="Account filter"
             >
-              {accountTabs.map((tab) => {
-                const active = (tab.id ?? null) === activeAccount;
+              <button
+                onClick={() => setActiveAccount(null)}
+                className={`px-4 py-2 rounded-full font-mono text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold ${
+                  activeAccount === null
+                    ? "bg-paper text-ink font-medium"
+                    : "bg-panel text-mist hover:text-paper border border-line"
+                }`}
+              >
+                All accounts
+              </button>
+              {accounts.map((tab) => {
+                const active = tab.id === activeAccount;
+                if (editingAccountId === tab.id) {
+                  return (
+                    <form key={tab.id} onSubmit={(e) => handleEditAccount(tab.id, e)} className="flex items-center gap-1">
+                      <input
+                        autoFocus
+                        value={editAccountName}
+                        onChange={(e) => setEditAccountName(e.target.value)}
+                        className="px-3 py-1.5 rounded-full font-mono text-sm bg-panel border border-gold text-paper outline-none w-32"
+                        onBlur={() => setEditingAccountId(null)}
+                      />
+                    </form>
+                  );
+                }
                 return (
-                  <button
-                    key={tab.id ?? "all"}
-                    onClick={() => setActiveAccount(tab.id ?? null)}
-                    className={`px-4 py-2 rounded-full font-mono text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold ${
-                      active
-                        ? "bg-paper text-ink font-medium"
-                        : "bg-panel text-mist hover:text-paper border border-line"
-                    }`}
-                  >
-                    {tab.name}
-                  </button>
+                  <div key={tab.id} className="group relative flex items-center">
+                    <button
+                      onClick={() => setActiveAccount(tab.id)}
+                      className={`px-4 py-2 rounded-full font-mono text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold ${
+                        active
+                          ? "bg-paper text-ink font-medium"
+                          : "bg-panel text-mist hover:text-paper border border-line"
+                      }`}
+                    >
+                      {tab.name}
+                    </button>
+                    {active && (
+                      <div className="absolute -top-2 -right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-panel rounded p-1 border border-line shadow z-10">
+                        <button onClick={() => { setEditingAccountId(tab.id); setEditAccountName(tab.name); }} className="text-xs text-mist hover:text-paper px-1">✎</button>
+                        <button onClick={() => handleDeleteAccount(tab.id)} className="text-xs text-coral hover:text-red-400 px-1">×</button>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
+              {isAddingAccount ? (
+                <form onSubmit={handleAddAccount} className="flex items-center gap-1">
+                  <input
+                    autoFocus
+                    value={newAccountName}
+                    onChange={(e) => setNewAccountName(e.target.value)}
+                    className="px-3 py-1.5 rounded-full font-mono text-sm bg-panel border border-gold text-paper outline-none w-32"
+                    onBlur={() => setIsAddingAccount(false)}
+                    placeholder="Name..."
+                  />
+                </form>
+              ) : (
+                <button
+                  onClick={() => setIsAddingAccount(true)}
+                  className="px-4 py-2 rounded-full font-mono text-sm transition-colors bg-panel text-mist border border-dashed border-line hover:border-gold hover:text-gold"
+                >
+                  + Add account
+                </button>
+              )}
             </nav>
           )}
 

@@ -31,22 +31,47 @@ export default function Dashboard({ portfolio }) {
   const chartData = holdings.map((h) => ({
     ticker: h.ticker_symbol,
     invested: h.invested_amount,
+    value: h.current_value !== null ? h.current_value : h.invested_amount,
   }));
+
+  const total_current_value = holdings.reduce((sum, h) => sum + (h.current_value !== null ? h.current_value : h.invested_amount), 0);
+  const total_pnl = total_current_value - total_invested;
+  const total_pnl_pct = total_invested > 0 ? (total_pnl / total_invested) * 100 : 0;
 
   return (
     <div className="space-y-6">
       {/* Summary card */}
-      <div className="bg-panel border border-line rounded-xl p-6">
-        <p className="font-mono text-xs text-mist uppercase tracking-widest mb-1">
-          Total invested — {account_name}
-        </p>
-        <p className="font-display text-4xl font-bold tabular-nums">
-          {currency(total_invested)}
-        </p>
-        <p className="font-mono text-xs text-mist mt-2">
-          {holdings.length} open position{holdings.length === 1 ? "" : "s"} ·
-          cost basis, weighted average method
-        </p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-panel border border-line rounded-xl p-6">
+          <p className="font-mono text-xs text-mist uppercase tracking-widest mb-1">
+            Total invested — {account_name}
+          </p>
+          <p className="font-display text-4xl font-bold tabular-nums">
+            {currency(total_invested)}
+          </p>
+          <p className="font-mono text-xs text-mist mt-2">
+            {holdings.length} open position{holdings.length === 1 ? "" : "s"}
+          </p>
+        </div>
+        <div className="bg-panel border border-line rounded-xl p-6">
+          <p className="font-mono text-xs text-mist uppercase tracking-widest mb-1">
+            Market Value
+          </p>
+          <p className="font-display text-4xl font-bold tabular-nums">
+            {currency(total_current_value)}
+          </p>
+        </div>
+        <div className="bg-panel border border-line rounded-xl p-6">
+          <p className="font-mono text-xs text-mist uppercase tracking-widest mb-1">
+            Unrealized P&L
+          </p>
+          <p className={`font-display text-4xl font-bold tabular-nums ${total_pnl > 0 ? 'text-mint' : total_pnl < 0 ? 'text-coral' : ''}`}>
+            {total_pnl > 0 ? '+' : ''}{currency(total_pnl)}
+          </p>
+          <p className={`font-mono text-xs mt-2 ${total_pnl > 0 ? 'text-mint' : total_pnl < 0 ? 'text-coral' : 'text-mist'}`}>
+            {total_pnl_pct > 0 ? '+' : ''}{total_pnl_pct.toFixed(2)}%
+          </p>
+        </div>
       </div>
 
       {holdings.length === 0 ? (
@@ -105,7 +130,10 @@ export default function Dashboard({ portfolio }) {
                   <th className="px-5 py-3">Asset</th>
                   <th className="px-5 py-3 text-right">Quantity</th>
                   <th className="px-5 py-3 text-right">Avg buy price</th>
+                  <th className="px-5 py-3 text-right">Current price</th>
                   <th className="px-5 py-3 text-right">Invested</th>
+                  <th className="px-5 py-3 text-right">Market value</th>
+                  <th className="px-5 py-3 text-right">P&L</th>
                   <th className="px-5 py-3 text-right">Weight</th>
                 </tr>
               </thead>
@@ -123,11 +151,20 @@ export default function Dashboard({ portfolio }) {
                       {currency(h.average_buy_price)}
                     </td>
                     <td className="px-5 py-3 text-right">
+                      {h.current_price !== null ? currency(h.current_price) : "—"}
+                    </td>
+                    <td className="px-5 py-3 text-right">
                       {currency(h.invested_amount)}
                     </td>
+                    <td className="px-5 py-3 text-right">
+                      {h.current_value !== null ? currency(h.current_value) : "—"}
+                    </td>
+                    <td className={`px-5 py-3 text-right ${h.unrealized_pnl > 0 ? 'text-mint' : h.unrealized_pnl < 0 ? 'text-coral' : ''}`}>
+                      {h.unrealized_pnl !== null ? `${h.unrealized_pnl > 0 ? '+' : ''}${currency(h.unrealized_pnl)} (${h.pnl_pct > 0 ? '+' : ''}${h.pnl_pct}%)` : "—"}
+                    </td>
                     <td className="px-5 py-3 text-right text-mist">
-                      {total_invested > 0
-                        ? ((h.invested_amount / total_invested) * 100).toFixed(1)
+                      {total_current_value > 0
+                        ? (((h.current_value !== null ? h.current_value : h.invested_amount) / total_current_value) * 100).toFixed(1)
                         : "0.0"}
                       %
                     </td>
