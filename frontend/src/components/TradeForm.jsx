@@ -95,8 +95,8 @@ export default function TradeForm({ accounts, onSaved }) {
     }
   };
 
-  const inputClass = (key) =>
-    `w-full rounded-md bg-ink border px-3 py-2 font-mono text-sm text-paper placeholder:text-mist/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold ${
+  const inputClass = (key, customWidth = "w-full") =>
+    `${customWidth} rounded-md bg-ink border px-3 py-2 font-mono text-sm text-paper placeholder:text-mist/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-gold ${
       fieldErrors[key] ? "border-coral" : "border-line"
     }`;
 
@@ -181,12 +181,12 @@ export default function TradeForm({ accounts, onSaved }) {
               placeholder="e.g. RELIANCE"
               value={form.ticker_symbol}
               onChange={set("ticker_symbol")}
-              className={inputClass("ticker_symbol") + " uppercase flex-1"}
+              className={inputClass("ticker_symbol", "flex-1") + " uppercase"}
             />
             <select
               value={form.exchange}
               onChange={set("exchange")}
-              className={inputClass("exchange") + " w-24 bg-ink"}
+              className={inputClass("exchange", "w-24") + " bg-ink"}
             >
               <option value="NSE">NSE</option>
               <option value="BSE">BSE</option>
