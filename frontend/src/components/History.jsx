@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 const currency = (n) =>
-  n.toLocaleString("en-US", { style: "currency", currency: "USD" });
+  n.toLocaleString("en-IN", { style: "currency", currency: "INR" });
 
 /**
  * Trade history table with per-row delete.

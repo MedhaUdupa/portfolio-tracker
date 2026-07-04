@@ -12,9 +12,9 @@ import {
 const ACCOUNT_COLORS = ["#E3B455", "#4FD1A5", "#7FA8E3", "#F27E7E", "#B08FE0"];
 
 const currency = (n) =>
-  n.toLocaleString("en-US", {
+  n.toLocaleString("en-IN", {
     style: "currency",
-    currency: "USD",
+    currency: "INR",
     maximumFractionDigits: 2,
   });
 
