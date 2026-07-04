@@ -113,7 +113,7 @@ export default function Comparison({ comparison }) {
                 <YAxis
                   stroke="#8B98A5"
                   tick={{ fontFamily: "IBM Plex Mono", fontSize: 12 }}
-                  tickFormatter={(v) => `$${v.toLocaleString()}`}
+                  tickFormatter={(v) => `₹${v.toLocaleString()}`}
                   width={80}
                 />
                 <Tooltip
